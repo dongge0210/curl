@@ -1130,7 +1130,7 @@ if(USE_NGHTTP2)
   endif()
 endif()
 
-option(USE_NGTCP2 "Use ngtcp2 and nghttp3 libraries for HTTP/3 support" OFF)
+option(USE_NGTCP2 "Use ngtcp2 and nghttp3 libraries for HTTP/3 support" ON)
 if(USE_NGTCP2)
   if(CURL_WITH_MULTI_SSL)
     message(FATAL_ERROR "MultiSSL cannot be enabled with HTTP/3 and vice versa.")
