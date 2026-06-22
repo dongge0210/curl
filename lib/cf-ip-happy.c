@@ -56,6 +56,7 @@
 #include "multiif.h"
 #include "progress.h"
 #include "select.h"
+#include "sockaddr.h"
 #include "vquic/vquic.h" /* for quic cfilters */
 
 
@@ -117,15 +118,18 @@ UNITTEST void debug_set_transport_provider(
 
 struct cf_ai_iter {
   struct Curl_cfilter *cf;
+  struct Curl_peer *peer;
   int ai_family;
   unsigned int n;
 };
 
 static void cf_ai_iter_init(struct cf_ai_iter *iter,
                             struct Curl_cfilter *cf,
+                            struct Curl_peer *peer,
                             int ai_family)
 {
   iter->cf = cf;
+  iter->peer = peer; /* not linked, ctx->ballers owns and has same lifetime */
   iter->ai_family = ai_family;
   iter->n = 0;
 }
@@ -138,7 +142,7 @@ static const struct Curl_addrinfo *cf_ai_iter_next(struct cf_ai_iter *iter,
   if(!iter->cf)
     return NULL;
 
-  addr = Curl_conn_dns_get_ai(data, iter->cf->sockindex,
+  addr = Curl_conn_dns_get_ai(data, iter->peer, iter->cf->sockindex,
                               iter->ai_family, iter->n);
   if(addr)
     iter->n++;
@@ -149,7 +153,7 @@ static bool cf_ai_iter_has_more(struct cf_ai_iter *iter,
                                 struct Curl_easy *data)
 {
   return (iter->cf &&
-          !!Curl_conn_dns_get_ai(data, iter->cf->sockindex,
+          !!Curl_conn_dns_get_ai(data, iter->peer, iter->cf->sockindex,
                                  iter->ai_family, iter->n));
 }
 
@@ -341,7 +345,7 @@ static CURLcode cf_ip_ballers_init(struct cf_ip_ballers *bs,
   bs->cf_create = get_cf_create(transport_peer, !!tunnel_peer);
   if(!bs->cf_create) {
     failf(data, "unsupported transport type %u%s",
-          transport_peer, tunnel_peer ? "to proxy" : "");
+          transport_peer, tunnel_peer ? " to proxy" : "");
     return CURLE_UNSUPPORTED_PROTOCOL;
   }
   Curl_peer_link(&bs->origin, origin);
@@ -497,7 +501,7 @@ evaluate:
                                  bs->cf_create);
       CURL_TRC_CF(data, cf, "starting %s attempt for ipv%s -> %d",
                   bs->running ? "next" : "first",
-                  (ai_family == AF_INET) ? "4" : "6", result);
+                  (ai_family == AF_INET) ? "4" : "6", (int)result);
       if(result)
         goto out;
       DEBUGASSERT(a);
@@ -526,7 +530,7 @@ evaluate:
           if(!a->inconclusive)
             continue;
           result = cf_ip_attempt_restart(a, cf, data);
-          CURL_TRC_CF(data, cf, "restarted baller %d -> %d", i, result);
+          CURL_TRC_CF(data, cf, "restarted baller %d -> %d", i, (int)result);
           if(result) /* serious failure */
             goto out;
           bs->last_attempt_started = *Curl_pgrs_now(data);
@@ -549,7 +553,7 @@ evaluate:
       result = CURLE_COULDNT_CONNECT;
       VERBOSE(i = 0);
       for(a = bs->running; a; a = a->next) {
-        CURL_TRC_CF(data, cf, "baller %d: result=%d", i, a->result);
+        CURL_TRC_CF(data, cf, "baller %d: result=%d", i, (int)a->result);
         if(a->result)
           result = a->result;
       }
@@ -712,14 +716,15 @@ static CURLcode is_connected(struct Curl_cfilter *cf,
       return CURLE_FAILED_INIT;
 
 #ifndef CURL_DISABLE_PROXY
-    if(conn->bits.socksproxy)
+    if(conn->socks_proxy.peer)
       proxy_peer = conn->socks_proxy.peer;
-    else if(conn->bits.httpproxy)
+    else if(conn->http_proxy.peer)
       proxy_peer = conn->http_proxy.peer;
 #endif
 
     viamsg[0] = 0;
-    if((peer != conn->origin) && (peer != proxy_peer)) {
+    if(!Curl_peer_equal(peer, conn->origin) &&
+       !Curl_peer_equal(peer, proxy_peer)) {
 #ifdef USE_UNIX_SOCKETS
       if(peer->unix_socket)
         curl_msnprintf(viamsg, sizeof(viamsg), " over unix://%s",
@@ -764,16 +769,16 @@ static CURLcode cf_ip_happy_init(struct Curl_cfilter *cf,
 
   if(ctx->ballers.transport_peer == TRNSPRT_UNIX) {
 #ifdef USE_UNIX_SOCKETS
-    cf_ai_iter_init(&ctx->ballers.addr_iter, cf, AF_UNIX);
+    cf_ai_iter_init(&ctx->ballers.addr_iter, cf, ctx->ballers.peer, AF_UNIX);
 #else
     return CURLE_UNSUPPORTED_PROTOCOL;
 #endif
   }
   else { /* TCP/UDP/QUIC */
 #ifdef USE_IPV6
-    cf_ai_iter_init(&ctx->ballers.ipv6_iter, cf, AF_INET6);
+    cf_ai_iter_init(&ctx->ballers.ipv6_iter, cf, ctx->ballers.peer, AF_INET6);
 #endif
-    cf_ai_iter_init(&ctx->ballers.addr_iter, cf, AF_INET);
+    cf_ai_iter_init(&ctx->ballers.addr_iter, cf, ctx->ballers.peer, AF_INET);
   }
 
   CURL_TRC_CF(data, cf, "init ip ballers for transport %u",
@@ -813,7 +818,7 @@ static CURLcode cf_ip_happy_shutdown(struct Curl_cfilter *cf,
   }
 
   result = cf_ip_ballers_shutdown(&ctx->ballers, data, done);
-  CURL_TRC_CF(data, cf, "shutdown -> %d, done=%d", result, *done);
+  CURL_TRC_CF(data, cf, "shutdown -> %d, done=%d", (int)result, *done);
   return result;
 }
 
@@ -826,7 +831,8 @@ static CURLcode cf_ip_happy_adjust_pollset(struct Curl_cfilter *cf,
 
   if(!cf->connected) {
     result = cf_ip_ballers_pollset(&ctx->ballers, data, ps);
-    CURL_TRC_CF(data, cf, "adjust_pollset -> %d, %u socks", result, ps->n);
+    CURL_TRC_CF(data, cf, "adjust_pollset -> %d, %u socks", (int)result,
+                ps->n);
   }
   return result;
 }
@@ -851,7 +857,7 @@ static CURLcode cf_ip_happy_connect(struct Curl_cfilter *cf,
   *done = FALSE;
 
   if(!ctx->dns_resolved) {
-    result = Curl_conn_dns_result(cf->conn, cf->sockindex);
+    result = Curl_conn_dns_result(cf->conn, cf->sockindex, ctx->ballers.peer);
     if(!result)
       ctx->dns_resolved = TRUE;
     else if(result == CURLE_AGAIN) {
@@ -884,7 +890,7 @@ static CURLcode cf_ip_happy_connect(struct Curl_cfilter *cf,
       ctx->ballers.winner->cf = NULL;
       cf_ip_happy_ctx_clear(ctx, data);
       Curl_expire_done(data, EXPIRE_HAPPY_EYEBALLS);
-      /* whatever errors where reported by ballers, clear our errorbuf */
+      /* whatever errors were reported by ballers, clear our errorbuf */
       Curl_reset_fail(data);
 
       if(cf->conn->scheme->protocol & PROTO_FAMILY_SSH)
@@ -987,16 +993,6 @@ struct Curl_cftype Curl_cft_ip_happy = {
   cf_ip_happy_query,
 };
 
-/**
- * Create an IP happy eyeball connection filter that uses the, once resolved,
- * address information to connect on ip families based on connection
- * configuration.
- * @param pcf        output, the created cfilter
- * @param data       easy handle used in creation
- * @param conn       connection the filter is created for
- * @param cf_create  method to create the sub-filters performing the
- *                   actual connects.
- */
 static CURLcode cf_ip_happy_create(struct Curl_cfilter **pcf,
                                    struct Curl_easy *data,
                                    struct Curl_peer *origin,

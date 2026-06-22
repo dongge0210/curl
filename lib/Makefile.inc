@@ -165,6 +165,8 @@ LIB_CFILES =         \
   cf-haproxy.c       \
   cf-https-connect.c \
   cf-ip-happy.c      \
+  cf-recvbuf.c       \
+  cf-setup.c         \
   cf-socket.c        \
   cfilters.c         \
   conncache.c        \
@@ -241,7 +243,6 @@ LIB_CFILES =         \
   multi_ev.c         \
   multi_ntfy.c       \
   netrc.c            \
-  noproxy.c          \
   openldap.c         \
   parsedate.c        \
   peer.c             \
@@ -249,6 +250,7 @@ LIB_CFILES =         \
   pop3.c             \
   progress.c         \
   protocol.c         \
+  proxy.c            \
   psl.c              \
   rand.c             \
   ratelimit.c        \
@@ -297,6 +299,8 @@ LIB_HFILES =         \
   cf-haproxy.h       \
   cf-https-connect.h \
   cf-ip-happy.h      \
+  cf-recvbuf.h       \
+  cf-setup.h         \
   cf-socket.h        \
   cfilters.h         \
   conncache.h        \
@@ -375,13 +379,13 @@ LIB_HFILES =         \
   multi_ntfy.h       \
   multiif.h          \
   netrc.h            \
-  noproxy.h          \
   parsedate.h        \
   peer.h             \
   pingpong.h         \
   pop3.h             \
   progress.h         \
   protocol.h         \
+  proxy.h            \
   psl.h              \
   rand.h             \
   ratelimit.h        \

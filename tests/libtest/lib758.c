@@ -250,7 +250,7 @@ static int t758_checkForCompletion(CURLM *multi, int *success)
     }
     else {
       curl_mfprintf(stderr, "%s got an unexpected message from curl: %d\n",
-                    t758_tag(), message->msg);
+                    t758_tag(), (int)message->msg);
       result = 1;
       *success = 0;
     }
@@ -352,7 +352,7 @@ static CURLcode t758_one(const char *URL, int timer_fail_at,
   easy_init(curl);
   debug_config.nohex = TRUE;
   debug_config.tracetime = TRUE;
-  test_setopt(curl, CURLOPT_DEBUGDATA, &debug_config);
+  easy_setopt(curl, CURLOPT_DEBUGDATA, &debug_config);
   easy_setopt(curl, CURLOPT_DEBUGFUNCTION, libtest_debug_cb);
   easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
@@ -386,7 +386,7 @@ static CURLcode t758_one(const char *URL, int timer_fail_at,
 
     if(t758_ctx.fake_async_cert_verification_pending &&
        !t758_ctx.fake_async_cert_verification_finished) {
-      /* the wakeup socket will be monitored */
+      /* the wakeup socket is monitored */
       if((sockets.read.count > 1) || sockets.write.count) {
         t758_msg("during verification there should be no sockets scheduled");
         result = TEST_ERR_MAJOR_BAD;
@@ -491,7 +491,7 @@ static CURLcode test_lib758(const char *URL)
      callback calls */
   result = t758_one(URL, 0, 0); /* no callback fails */
   if(result)
-    curl_mfprintf(stderr, "%s FAILED: %d\n", t758_tag(), result);
+    curl_mfprintf(stderr, "%s FAILED: %d\n", t758_tag(), (int)result);
 
   return result;
 }

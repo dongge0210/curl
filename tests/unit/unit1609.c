@@ -45,9 +45,10 @@ static CURLcode t1609_setup(void)
      time request is made, it can get expired.  This happens because, when
      we set address using CURLOPT_RESOLVE,
      it usually marks as permanent (by setting timestamp to zero). However,
-     if address already exists
-     in the cache, then it does not mark it, but leaves it as it is.
-     So we fixing this by timestamp to zero if address already exists too.
+     if address already exists in the cache, then it does not mark it, but
+     leaves it as it is.
+     We are fixing this by setting timestamp to zero if address already
+     exists too.
 
   Test:
 
@@ -145,8 +146,8 @@ static CURLcode test_unit1609(const char *arg)
       if(!addr && !tests[i].address[j])
         break;
 
-      if(addr && !Curl_addr2string(addr->ai_addr, addr->ai_addrlen,
-                                   ipaddress, &port)) {
+      if(addr && !sockaddr2string(addr->ai_addr, addr->ai_addrlen,
+                                  ipaddress, &port)) {
         curl_mfprintf(stderr,
                       "%s:%d tests[%zu] failed. Curl_addr2string failed.\n",
                       __FILE__, __LINE__, i);

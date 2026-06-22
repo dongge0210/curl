@@ -496,7 +496,7 @@ static CURLcode pop3_perform_upgrade_tls(struct Curl_easy *data,
   DEBUGASSERT(!pop3c->ssldone);
   result = Curl_conn_connect(data, FIRSTSOCKET, FALSE, &ssldone);
   DEBUGF(infof(data, "pop3_perform_upgrade_tls, connect -> %d, %d",
-               result, ssldone));
+               (int)result, ssldone));
   if(!result && ssldone) {
     pop3c->ssldone = ssldone;
     /* perform CAPA now, changes pop3c->state out of POP3_UPGRADETLS */
@@ -585,7 +585,7 @@ static CURLcode pop3_perform_apop(struct Curl_easy *data,
   /* Finalise the digest */
   Curl_MD5_final(ctxt, digest);
 
-  /* Convert the calculated 16 octet digest into a 32 byte hex string */
+  /* Convert the calculated 16 octet digest into a 32-byte hex string */
   for(i = 0; i < MD5_DIGEST_LEN; i++)
     curl_msnprintf(&secret[2 * i], 3, "%02x", digest[i]);
 

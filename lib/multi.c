@@ -531,6 +531,8 @@ CURLMcode curl_multi_add_handle(CURLM *m, CURL *curl)
 
   /* set the easy handle */
   multistate(data, MSTATE_INIT);
+  /* not yet passed INIT state */
+  data->state.really_alive = FALSE;
 
 #ifdef USE_LIBPSL
   /* Do the same for PSL. */
@@ -569,12 +571,6 @@ CURLMcode curl_multi_add_handle(CURLM *m, CURL *curl)
   multi->admin->set.server_response_timeout =
     data->set.server_response_timeout;
   multi->admin->set.no_signal = data->set.no_signal;
-
-  mresult = multi_assess_wakeup(multi);
-  if(mresult) {
-    failf(data, "error enabling wakeup listening: %d", mresult);
-    return mresult;
-  }
 
   CURL_TRC_M(data, "added to multi, mid=%u, running=%u, total=%u",
              data->mid, Curl_multi_xfers_running(multi),
@@ -851,6 +847,12 @@ CURLMcode curl_multi_remove_handle(CURLM *m, CURL *curl)
   /* If in `msgsent`, it was deducted from `multi->xfers_alive` already. */
   if(!Curl_uint32_bset_contains(&multi->msgsent, data->mid))
     --multi->xfers_alive;
+  if(data->state.really_alive) {
+    data->state.really_alive = FALSE;
+    --multi->xfers_really_alive;
+    if(!multi->xfers_really_alive)
+      (void)multi_assess_wakeup(multi);
+  }
 
   Curl_wildcard_dtor(&data->wildcard);
 
@@ -1151,7 +1153,9 @@ CURLMcode Curl_multi_pollset(struct Curl_easy *data,
   /* The admin handle always listens on the wakeup socket when there
    * are transfers alive. */
   if(data->multi && (data == data->multi->admin) &&
-     data->multi->xfers_alive) {
+     data->multi->xfers_really_alive) {
+    CURL_TRC_M(data, "adding wakeup, %u xfers really alive",
+               data->multi->xfers_really_alive);
     result = Curl_pollset_add_in(data, ps, data->multi->wakeup_pair[0]);
   }
 #endif
@@ -1204,7 +1208,8 @@ CURLMcode Curl_multi_pollset(struct Curl_easy *data,
       break;
 
     default:
-      failf(data, "multi_getsock: unexpected multi state %d", data->mstate);
+      failf(data, "multi_getsock: unexpected multi state %d",
+            (int)data->mstate);
       DEBUGASSERT(0);
       break;
     }
@@ -1213,7 +1218,7 @@ CURLMcode Curl_multi_pollset(struct Curl_easy *data,
   if(result) {
     if(result == CURLE_OUT_OF_MEMORY)
       return CURLM_OUT_OF_MEMORY;
-    failf(data, "error determining pollset: %d", result);
+    failf(data, "error determining pollset: %d", (int)result);
     return CURLM_INTERNAL_ERROR;
   }
 
@@ -2192,8 +2197,6 @@ static CURLMcode multistate_do(struct Curl_easy *data,
     /* Perform the protocol's DO action */
     result = multi_do(data, &dophase_done);
 
-    /* When multi_do() returns failure, data->conn might be NULL! */
-
     if(!result) {
       if(!dophase_done) {
 #ifndef CURL_DISABLE_FTP
@@ -2460,6 +2463,12 @@ static void handle_completed(struct Curl_multi *multi,
   Curl_uint32_bset_remove(&multi->dirty, data->mid);
   Curl_uint32_bset_remove(&multi->pending, data->mid);
   Curl_uint32_bset_add(&multi->msgsent, data->mid);
+  if(data->state.really_alive) {
+    data->state.really_alive = FALSE;
+    --multi->xfers_really_alive;
+    if(!multi->xfers_really_alive)
+      (void)multi_assess_wakeup(multi);
+  }
   --multi->xfers_alive;
   if(!multi->xfers_alive)
     multi_assess_wakeup(multi);
@@ -2467,6 +2476,18 @@ static void handle_completed(struct Curl_multi *multi,
 
 static CURLMcode multistate_init(struct Curl_easy *data, CURLcode *result)
 {
+  if(!data->state.really_alive) {
+    data->state.really_alive = TRUE;
+    ++data->multi->xfers_really_alive;
+    if(data->multi->xfers_really_alive == 1) {
+      CURLMcode mresult = multi_assess_wakeup(data->multi);
+      if(mresult) {
+        failf(data, "error enabling wakeup listening: %d", mresult);
+        return mresult;
+      }
+    }
+  }
+
   *result = Curl_pretransfer(data);
   if(*result)
     return CURLM_OK;
@@ -2505,7 +2526,7 @@ static CURLMcode multistate_connecting(struct Curl_easy *data,
   }
   if(!Curl_xfer_recv_is_paused(data)) {
     *result = Curl_conn_connect(data, FIRSTSOCKET, FALSE, &connected);
-    if(connected && !(*result)) {
+    if(connected && !*result) {
       if(!data->conn->bits.reuse &&
          Curl_conn_is_multiplex(data->conn, FIRSTSOCKET)) {
         /* new connection, can multiplex, wake pending handles */
@@ -2516,7 +2537,7 @@ static CURLMcode multistate_connecting(struct Curl_easy *data,
     }
     else if(*result) {
       /* failure detected */
-      CURL_TRC_M(data, "connect failed -> %d", *result);
+      CURL_TRC_M(data, "connect failed -> %d", (int)*result);
       multi_posttransfer(data);
       multi_done(data, *result, TRUE);
       *stream_error = TRUE;
@@ -2532,7 +2553,7 @@ static CURLMcode multistate_protoconnect(struct Curl_easy *data,
 {
   bool protocol_connected = FALSE;
 
-  if(!(*result) && data->conn->bits.reuse) {
+  if(!*result && data->conn->bits.reuse) {
     /* ftp seems to hang when protoconnect on reused connection since we
      * handle PROTOCONNECT in general inside the filters, it seems wrong to
      * restart this on a reused connection.
@@ -2540,14 +2561,14 @@ static CURLMcode multistate_protoconnect(struct Curl_easy *data,
     multistate(data, MSTATE_DO);
     return CURLM_CALL_MULTI_PERFORM;
   }
-  if(!(*result))
+  if(!*result)
     *result = protocol_connect(data, &protocol_connected);
-  if(!(*result) && !protocol_connected) {
+  if(!*result && !protocol_connected) {
     /* switch to waiting state */
     multistate(data, MSTATE_PROTOCONNECTING);
     return CURLM_CALL_MULTI_PERFORM;
   }
-  else if(!(*result)) {
+  else if(!*result) {
     /* protocol connect has completed, go WAITDO or DO */
     multistate(data, MSTATE_DO);
     return CURLM_CALL_MULTI_PERFORM;
@@ -2568,7 +2589,7 @@ static CURLMcode multistate_protoconnecting(struct Curl_easy *data,
 
   /* protocol-specific connect phase */
   *result = protocol_connecting(data, &protocol_connected);
-  if(!(*result) && protocol_connected) {
+  if(!*result && protocol_connected) {
     /* after the connect has completed, go WAITDO or DO */
     multistate(data, MSTATE_DO);
     return CURLM_CALL_MULTI_PERFORM;
@@ -2591,7 +2612,7 @@ static CURLMcode multistate_doing(struct Curl_easy *data,
   /* we continue DOING until the DO phase is complete */
   DEBUGASSERT(data->conn);
   *result = protocol_doing(data, &dophase_done);
-  if(!(*result)) {
+  if(!*result) {
     if(dophase_done) {
       /* after DO, go DO_DONE or DO_MORE */
       multistate(data, data->conn->bits.do_more ?
@@ -2620,7 +2641,7 @@ static CURLMcode multistate_doing_more(struct Curl_easy *data,
   DEBUGASSERT(data->conn);
   *result = multi_do_more(data, &control);
 
-  if(!(*result)) {
+  if(!*result) {
     if(control != DOMORE_INCOMPLETE) {
       /* if DONE, advance to DO_DONE
          if GOBACK, go back to DOING */

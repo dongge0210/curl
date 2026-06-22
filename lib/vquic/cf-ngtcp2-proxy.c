@@ -583,7 +583,7 @@ static nghttp3_ssize cb_h3_tunnel_read_data(nghttp3_conn *conn,
       nwritten += vec[nvecs].len;
       ++nvecs;
     }
-    DEBUGASSERT(nvecs > 0); /* we SHOULD have been be able to peek */
+    DEBUGASSERT(nvecs > 0); /* we SHOULD have been able to peek */
   }
 
   if(!nwritten) {
@@ -774,7 +774,7 @@ static CURLcode cf_h3_proxy_send(struct Curl_cfilter *cf,
     result = cf_h3_proxy_sendbuf_add(data, stream, buf, len, pnwritten);
     CURL_TRC_CF(data, cf, "[%" PRId64 "] cf_send, add to "
                 "sendbuf(len=%zu) -> %d, %zu",
-                stream->id, len, result, *pnwritten);
+                stream->id, len, (int)result, *pnwritten);
     if(result)
       goto out;
     (void)nghttp3_conn_resume_stream(ctx->h3conn, stream->id);
@@ -791,7 +791,7 @@ out:
                           Curl_cf_ngtcp2_cmn_set_expiry(cf, data, &pktx));
 denied:
   CURL_TRC_CF(data, cf, "[%" PRId64 "] cf_send(len=%zu) -> %d, %zu",
-              stream ? stream->id : -1, len, result, *pnwritten);
+              stream ? stream->id : -1, len, (int)result, *pnwritten);
   CF_DATA_RESTORE(cf, save);
   return result;
 }
@@ -843,7 +843,7 @@ static CURLcode cf_h3_proxy_recv(struct Curl_cfilter *cf,
     result = Curl_bufq_cread(&pctx->tunnel.recvbuf, buf, len, pnread);
     if(result) {
       CURL_TRC_CF(data, cf, "[%" PRId64 "] read inbufq(len=%zu) -> %zu, %d",
-                  stream->id, len, *pnread, result);
+                  stream->id, len, *pnread, (int)result);
       goto out;
     }
   }
@@ -875,7 +875,7 @@ out:
                           Curl_cf_ngtcp2_cmn_set_expiry(cf, data, &pktx));
 denied:
   CURL_TRC_CF(data, cf, "[%" PRId64 "] cf_recv(len=%zu) -> %d, %zu",
-              stream ? stream->id : -1, len, result, *pnread);
+              stream ? stream->id : -1, len, (int)result, *pnread);
   CF_DATA_RESTORE(cf, save);
   return result;
 }
@@ -934,18 +934,17 @@ static CURLcode cf_h3_proxy_submit(struct Curl_cfilter *cf,
     int rv;
 
     DEBUGASSERT(stream->id == -1);
-    rv = ngtcp2_conn_open_bidi_stream(ctx->qconn, &sid, data);
+    /* Do NOT set `data` as stream user data. The transfer `data` may
+     * get cleaned up long before the tunnel goes down. */
+    rv = ngtcp2_conn_open_bidi_stream(ctx->qconn, &sid, NULL);
     if(rv) {
       failf(data, "cannot get bidi streams: %s", ngtcp2_strerror(rv));
       result = CURLE_SEND_ERROR;
       goto out;
     }
     stream->id = sid;
-    ++ctx->used_bidi_streams;
-
-    /* Do NOT set `data` as stream user data. The transfer `data` may
-     * get cleaned up long before the tunnel goes down. */
     ts->stream = stream;
+    ++ctx->used_bidi_streams;
     CURL_TRC_CF(data, cf, "[%" PRId64 "] opened bidi stream", sid);
   }
 
@@ -1168,7 +1167,7 @@ static CURLcode cf_h3_proxy_connect(struct Curl_cfilter *cf,
   CF_DATA_SAVE(save, cf, data);
   data_saved = TRUE;
 
-  /* At this point the QUIC is connected, but the proxy isn't connected */
+  /* At this point the QUIC is connected, but the proxy is not connected */
   result = cf_h3_proxy_tunnel(cf, data, ts, done);
 
 out:

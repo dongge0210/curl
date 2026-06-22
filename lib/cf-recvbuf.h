@@ -1,5 +1,5 @@
-#ifndef HEADER_CURL_NOPROXY_H
-#define HEADER_CURL_NOPROXY_H
+#ifndef HEADER_CURL_CF_RECVBUF_H
+#define HEADER_CURL_CF_RECVBUF_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -25,8 +25,16 @@
  ***************************************************************************/
 #include "curl_setup.h"
 
-#ifndef CURL_DISABLE_PROXY
-bool Curl_check_noproxy(const char *name, const char *no_proxy);
-#endif
+#ifndef CURL_DISABLE_WEBSOCKETS
+/* only used for this protocol, so far */
 
-#endif /* HEADER_CURL_NOPROXY_H */
+CURLcode Curl_cf_recvbuf_add(struct Curl_easy *data,
+                             struct connectdata *conn,
+                             int sockindex,
+                             const uint8_t *buf, size_t blen);
+
+extern struct Curl_cftype Curl_cft_recvbuf;
+
+#endif /* !CURL_DISABLE_WEBSOCKETS */
+
+#endif /* HEADER_CURL_CF_RECVBUF_H */

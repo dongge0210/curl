@@ -55,8 +55,7 @@ static CURLcode dynhds_add_custom(struct Curl_easy *data,
   else if(is_connect && is_udp)
     proxy = HEADER_CONNECT_UDP;
   else
-    proxy = (conn->bits.httpproxy && !conn->bits.tunnel_proxy) ?
-      HEADER_PROXY : HEADER_SERVER;
+    proxy = conn->bits.origin_is_proxy ? HEADER_PROXY : HEADER_SERVER;
 
   switch(proxy) {
   case HEADER_SERVER:
@@ -512,7 +511,7 @@ CURLcode Curl_http_proxy_inspect_tunnel_response(
       capsule_protocol = Curl_dynhds_cget(&resp->headers,
                                            "capsule-protocol");
       if(capsule_protocol) {
-        if(strncmp(capsule_protocol->value, "?1", 2) == 0 &&
+        if(!strncmp(capsule_protocol->value, "?1", 2) &&
            !capsule_protocol->value[2]) {
           infof(data, "CONNECT-UDP tunnel established, response %d",
                 resp->status);
